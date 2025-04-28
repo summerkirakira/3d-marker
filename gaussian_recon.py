@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import numpy as np
 
 folder_path = Path(r"D:\Dataset\ScanNet\ScanNetRaw\scene0000_00\images")
 
@@ -49,14 +50,25 @@ img_files = sorted(img_path.glob("*.jpg"), key=lambda x: int(x.stem))
 
 # 每6张图片抽取一张
 for i, img_file in enumerate(img_files):
-    if i % 6 != 0:  # 跳过不是6的倍数的索引
+    if i % 10 != 0:  # 跳过不是6的倍数的索引
         continue
         
     pose = pose_path / f"{img_file.stem}.txt"
     pose = read_intrinsic_matrix(pose)
+    # OpenCV到Blender坐标系的转换矩阵
+    cv_to_blender = np.array([
+        [1, 0, 0, 0],
+        [0, -1, 0, 0], 
+        [0, 0, -1, 0],
+        [0, 0, 0, 1]
+    ])
+    
+    # 将pose转换为numpy数组并转换坐标系
+    pose = np.array(pose)
+    pose = pose @ cv_to_blender
     frames.append({
         "file_path": str(img_file.absolute()),
-        "transform_matrix": pose,
+        "transform_matrix": pose.tolist(),
         "w": width,
         "h": height,
     })
