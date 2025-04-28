@@ -7,7 +7,7 @@ from image_util import select_image_with_low_blur
 import pickle
 import shutil
 IMAGE_INTERVAL = 100
-IMAGE_CHECK_NUM = 10
+IMAGE_CHECK_NUM = 20
 IMAGE_SELECT_NUM = 8
 
 
@@ -314,15 +314,17 @@ def extract_data(scan_path: Path):
             new_used_image_list.append(used_image_list[i])
 
     new_seg_2d = {}
+    cam_poses = []
     for key, value in seg_2d_cache.items():
         if key in used_item_image_list or key in new_used_image_list:
             new_seg_2d[key] = value
             shutil.copy(img_path / f"{key}.jpg", used_image_foler / f"{key}.jpg")
-
+            cam_poses.append(read_camera_matrix(pose_path / f"{key}.txt"))
     scene_info = {
         "used_image_list": new_used_image_list,
         "max_item_coverage_dict": max_item_coverage_dict,
         "seg_2d": new_seg_2d,
+        "cam_poses": cam_poses,
     }
 
     pickle.dump(scene_info, open(scan_path / f"{scan_name}_scene_info.pkl", "wb"))
