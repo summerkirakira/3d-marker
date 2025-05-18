@@ -35,18 +35,19 @@ def main():
 #   if opt.export_intrinsics:
 #     sd.export_intrinsics(os.path.join(opt.output_path, 'intrinsic'))
 
-    root_path = Path("/Users/forever/Documents/Code/ScanNetMarker/data/scannet/scans")
+    root_path = Path("/mnt/ssd0/kira-home/Dataset/ScanNet/Raw/scans")
     for sens_path in root_path.glob("**/*.sens"):
         images_path = sens_path.parent / "images"
-        # if images_path.exists():
-        #     continue
+        if images_path.exists():
+            continue
+        print(f"Processing {sens_path}")
         images_path.mkdir(parents=True, exist_ok=True)
         sd = SensorData(str(sens_path))
         sd.export_color_images(str(images_path / "color"))
         # sd.export_depth_images(str(images_path / "depth"))
         sd.export_poses(str(images_path / "pose"))
         sd.export_intrinsics(str(images_path / "intrinsic"))
-
+        print(f"Processed {sens_path}")
         # 删除sens文件
         sens_path.unlink()
 

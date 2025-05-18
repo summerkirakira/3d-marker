@@ -9,6 +9,8 @@ import shutil
 IMAGE_INTERVAL = 100
 IMAGE_CHECK_NUM = 20
 IMAGE_SELECT_NUM = 8
+IMAGE_WIDTH = 1260
+IMAGE_HEIGHT = 966
 
 
 def determine_occlusion_depth_sorting(points_3d, camera_pose):
@@ -72,13 +74,16 @@ def visualize_depth_sorted_points_with_extrinsics(points_3d, camera_matrix, came
     for idx in sorted_indices:
         X_camera, Y_camera, Z_camera = points_camera[idx]
         
-        # 忽略相机后方的点
-        if Z_camera <= 0:
+        # 忽略相机后方的点和无效的Z值
+        if Z_camera <= 0 or np.isnan(Z_camera):
             continue
-        
-        # 投影到图像平面
-        u = int(fx * X_camera / Z_camera + cx)
-        v = int(fy * Y_camera / Z_camera + cy)
+            
+        # 计算投影坐标，添加检查
+        try:
+            u = int(fx * X_camera / Z_camera + cx)
+            v = int(fy * Y_camera / Z_camera + cy)
+        except (ValueError, OverflowError):
+            continue
         
         # 检查点是否在图像范围内
         if 0 <= u < width and 0 <= v < height:
@@ -229,12 +234,15 @@ def extract_data(scan_path: Path):
     
     filtered_points = np.array(filtered_points)
 
-    print(filtered_points.shape)
+    # print(filtered_points.shape)
 
     intr_matrix = read_camera_matrix(intr_path)
 
-    width = int(intr_matrix[0][2])
-    height = int(intr_matrix[1][2])
+    width = IMAGE_WIDTH
+    height = IMAGE_HEIGHT
+
+    intr_matrix[0][2] = width / 2
+    intr_matrix[1][2] = height / 2
 
     image_num = len(list(pose_path.glob("*.txt")))
     unique_point_indices = []
@@ -249,6 +257,9 @@ def extract_data(scan_path: Path):
 
     seg_2d_cache = {}
     used_image_list = []
+
+    IMAGE_INTERVAL = image_num // 50
+    IMAGE_CHECK_NUM = IMAGE_INTERVAL // 2
 
     for i in range(image_num):
         if i % IMAGE_INTERVAL != 0:
@@ -265,7 +276,7 @@ def extract_data(scan_path: Path):
         check_image_list = [img_path / f"{i}.jpg" for i in range(start_idx, end_idx)]
         selected_image_path = select_image_with_low_blur(check_image_list)
         pose_file = pose_path / f"{selected_image_path.stem}.txt"
-        used_image_list.append(selected_image_path)
+        used_image_list.append(int(pose_file.stem))
         with open(pose_file, 'r') as f:
             camera_pose = read_camera_matrix(pose_file)
         camera_pose = np.linalg.inv(camera_pose)
@@ -287,6 +298,7 @@ def extract_data(scan_path: Path):
                 max_item_coverage_dict[i]["image_idx"] = int(pose_file.stem)
             
         seg_2d_cache[int(pose_file.stem)] = object_id_buffer
+        # print(seg_2d_cache.keys())
         
 
         print(f"pose_file: {pose_file}, unique_point_indices: {len(np.unique(point_indices))}")
@@ -307,21 +319,42 @@ def extract_data(scan_path: Path):
     used_image_foler.mkdir(parents=True, exist_ok=True)
 
     used_item_image_list = [item["image_idx"] for item in max_item_coverage_dict.values()]
+    # print(used_item_image_list)
+    # used_item_image_list = []
 
     new_used_image_list = []
-    for i in range(len(used_image_list)):
-        if i in selected_indices:
-            new_used_image_list.append(used_image_list[i])
+    # for i in range(len(used_image_list)):
+    #     if i in selected_indices:
+    #         new_used_image_list.append(used_image_list[i])
+
+    for i in selected_indices:
+        new_used_image_list.append(used_image_list[i])
+    
+    print(new_used_image_list)
 
     new_seg_2d = {}
     cam_poses = []
     for key, value in seg_2d_cache.items():
-        if key in used_item_image_list or key in new_used_image_list:
+        if (key in used_item_image_list) or (key in new_used_image_list):
             new_seg_2d[key] = value
-            shutil.copy(img_path / f"{key}.jpg", used_image_foler / f"{key}.jpg")
-            cam_poses.append(read_camera_matrix(pose_path / f"{key}.txt"))
+            from PIL import Image
+            img = Image.open(img_path / f"{key}.jpg")
+            width, height = img.size
+            left = (width - IMAGE_WIDTH) // 2
+            top = (height - IMAGE_HEIGHT) // 2
+            right = left + IMAGE_WIDTH
+            bottom = top + IMAGE_HEIGHT
+            img = img.crop((left, top, right, bottom))
+            img.save(used_image_foler / f"{key}.jpg")
+            intr_matrix = read_camera_matrix(pose_path / f"{key}.txt")
+            intr_matrix[0][2] = IMAGE_WIDTH / 2
+            intr_matrix[1][2] = IMAGE_HEIGHT / 2
+            cam_poses.append(intr_matrix)
+    
+    image_files = [str(Path(used_image_foler / f"{i}.jpg").absolute()) for i in new_used_image_list]
+    # print(image_files)
     scene_info = {
-        "used_image_list": new_used_image_list,
+        "used_image_list": image_files,
         "max_item_coverage_dict": max_item_coverage_dict,
         "seg_2d": new_seg_2d,
         "cam_poses": cam_poses,
@@ -331,7 +364,27 @@ def extract_data(scan_path: Path):
 
 
 if __name__ == "__main__":
-    extract_data(Path(r"/Users/forever/Documents/Code/ScanNetMarker/scene0000_00"))
+
+    from multiprocessing import Pool
+
+    def process_scan(scan_path):
+        try:
+            print(f"Processing {scan_path}")
+            extract_data(Path(scan_path))
+        except Exception as e:
+            print(f"处理 {scan_path} 时出错: {e}")
+
+    if __name__ == "__main__":
+        # root_path = Path("/mnt/ssd0/kira-home/Dataset/ScanNet/Raw/scans")
+        # # 获取所有scan路径
+        # image_paths = root_path.glob("**/images")
+        # scan_paths = [image_path.parent for image_path in image_paths if not (image_path.parent / f"{image_path.parent.name}_scene_info.pkl").exists()]
+        
+        # # 使用进程池处理
+        # with Pool(processes=8) as pool:
+        #     pool.map(process_scan, scan_paths)
+
+        extract_data(Path(r"/mnt/ssd0/kira-home/Dataset/ScanNet/Raw/scans/scene0000_00"))
 
     
             
